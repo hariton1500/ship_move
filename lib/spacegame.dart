@@ -2,10 +2,12 @@ import 'dart:math' as math;
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
+import 'package:flame/experimental.dart';
 import 'package:ship_move/shipcomponent.dart';
 
 class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDetector {
   late ShipComponent player, point;
+  static const double worldSizeMeters = 100000;
   double _targetZoom = 1.0;
   final double _minZoom = 0.5;
   final double _maxZoom = 2.5;
@@ -13,14 +15,19 @@ class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDet
 
   @override
   Future<void> onLoad() async {
+    camera.setBounds(
+      Rectangle.fromLTWH(0, 0, worldSizeMeters, worldSizeMeters),
+      considerViewport: true,
+    );
+
     player = ShipComponent()
-      ..position = Vector2(100, 100);
+      ..position = Vector2(50000, 50000);
 
     world.add(player);
 
     camera.viewfinder.anchor = Anchor.center;
 
-    point = ShipComponent()..position = Vector2(500, 500);
+    point = ShipComponent()..position = Vector2(60000, 60000);
     world.add(point);
   }
 

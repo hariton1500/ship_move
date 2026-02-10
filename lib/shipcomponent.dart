@@ -18,7 +18,7 @@ class ShipComponent extends PositionComponent {
 
   ShipComponent() {
     anchor = Anchor.center;
-    size = Vector2(40, 20);
+    size = Vector2(100, 100);
   }
 
   void moveTo(Vector2 worldTarget) {
