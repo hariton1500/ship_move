@@ -1,10 +1,14 @@
 import 'dart:math';
 import 'package:flame/components.dart';
+import 'package:flame/events.dart';
 import 'package:flutter/material.dart';
 
 // Компонент корабля: треугольник + простая физика движения.
-class ShipComponent extends PositionComponent with HasGameReference {
+class ShipComponent extends PositionComponent with HasGameReference, TapCallbacks {
   final Paint _paint = Paint()..color = Colors.white;
+  final bool isPlayer; // отличаем игрока от чужих
+  final void Function(ShipComponent ship)? onTap; // коллбек при клике
+  final int index; // индекс корабля для диагностики
   // Физика
   Vector2 velocity = Vector2.zero();
   double angleRad = 0;
@@ -17,7 +21,7 @@ class ShipComponent extends PositionComponent with HasGameReference {
   // Цель движения
   Vector2? target;
 
-  ShipComponent() {
+  ShipComponent({required this.index, this.isPlayer = false, this.onTap}) {
     anchor = Anchor.center;
     size = Vector2(100, 100);
   }
@@ -52,6 +56,14 @@ class ShipComponent extends PositionComponent with HasGameReference {
     canvas.drawPath(path, _paint);
     if (scale != 1.0) {
       canvas.restore();
+    }
+  }
+
+  @override
+  void onTapDown(TapDownEvent event) {
+    // Реагируем только на клики по чужим кораблям.
+    if (!isPlayer) {
+      onTap?.call(this);
     }
   }
 
