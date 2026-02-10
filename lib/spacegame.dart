@@ -157,8 +157,8 @@ class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDet
     _infoPanel.add(_customRadiusButton);
 
     camera.viewport.add(_infoPanel);
-    _layoutInfoPanel();
     _uiReady = true;
+    _layoutInfoPanel();
   }
 
   @override
