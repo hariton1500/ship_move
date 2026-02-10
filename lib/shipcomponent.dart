@@ -2,7 +2,8 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
-class ShipComponent extends PositionComponent {
+// Компонент корабля: треугольник + простая физика движения.
+class ShipComponent extends PositionComponent with HasGameReference {
   final Paint _paint = Paint()..color = Colors.white;
   // Физика
   Vector2 velocity = Vector2.zero();
@@ -21,6 +22,7 @@ class ShipComponent extends PositionComponent {
     size = Vector2(100, 100);
   }
 
+  // Задать цель в мировых координатах.
   void moveTo(Vector2 worldTarget) {
     target = worldTarget.clone();
   }
@@ -30,6 +32,17 @@ class ShipComponent extends PositionComponent {
     super.render(canvas);
     final w = size.x;
     final h = size.y;
+    // Минимум 10px на экране независимо от зума.
+    final zoom = game.camera.viewfinder.zoom;
+    final minDim = min(w, h);
+    final minScreenPx = 10.0;
+    final scale = max(1.0, minScreenPx / (minDim * zoom));
+    if (scale != 1.0) {
+      canvas.save();
+      canvas.translate(w * 0.5, h * 0.5);
+      canvas.scale(scale);
+      canvas.translate(-w * 0.5, -h * 0.5);
+    }
     final path = Path()
       ..moveTo(w * 0.5, 0)
       ..lineTo(0, h)
@@ -37,6 +50,9 @@ class ShipComponent extends PositionComponent {
       //..lineTo(w, 0)
       ..close();
     canvas.drawPath(path, _paint);
+    if (scale != 1.0) {
+      canvas.restore();
+    }
   }
 
   @override
@@ -45,10 +61,12 @@ class ShipComponent extends PositionComponent {
 
     if (target == null) return;
 
+    // Вектор к цели и расстояние.
     final toTarget = target! - position;
     final distance = toTarget.length;
 
     if (distance < 5 && velocity.length < 10) {
+      // Достигли цели.
       velocity.setZero();
       target = null;
       return;
@@ -64,9 +82,11 @@ class ShipComponent extends PositionComponent {
         (velocity.length * velocity.length) / (2 * acceleration);
 
     if (distance > brakeDistance) {
+      // Ускоряемся в направлении носа.
       final forward = Vector2(cos(angleRad), sin(angleRad));
       velocity += forward * acceleration * dt;
     } else {
+      // Мягко тормозим.
       velocity *= 0.95; // мягкое торможение
     }
 
@@ -74,10 +94,12 @@ class ShipComponent extends PositionComponent {
       velocity.scaleTo(maxSpeed);
     }
 
+    // Применяем движение и угол.
     position += velocity * dt;
     angle = angleRad;
   }
 
+  // Угол кратчайшего поворота.
   double _shortestAngle(double a, double b) {
     double diff = (b - a + pi) % (2 * pi) - pi;
     return diff < -pi ? diff + 2 * pi : diff;

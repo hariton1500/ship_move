@@ -11,11 +11,12 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
 
-  late SpaceGame game;
+  late SpaceGame game; // экземпляр игры
 
   @override
   void initState() {
     super.initState();
+    // Инициализация игры один раз.
     game = SpaceGame();
   }
 
@@ -24,12 +25,14 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       appBar: AppBar(
         actions: [
+          // Тестовая кнопка: поставить цель игроку.
           IconButton(onPressed: () {
             game.player.target = Vector2(500, 500);
           }, icon: Icon(Icons.move_to_inbox))
         ],
       ),
       body: Center(
+        // Встраиваем игровое поле.
         child: GameWidget(game: game),
       ),
     );
