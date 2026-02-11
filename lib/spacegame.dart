@@ -11,6 +11,7 @@ import 'package:ship_move/shipcomponent.dart';
 class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDetector {
   late ShipComponent player, point;
   late TextComponent _zoomHud; // отладочный HUD
+  late TextComponent _battleHud; // HUD по всем целям справа
   bool _shipsReady = false; // защита от доступа до onLoad
   ShipComponent? lastTappedShip; // последний кликнутый чужой корабль
   late RectangleComponent _infoPanel; // нижняя информационная панель
@@ -32,7 +33,7 @@ class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDet
   final double _orbitAngularSpeed = 0.2; // рад/сек
   static const double worldSizeMeters = 100000; // размер мира
   double _targetZoom = 1.0; // целевой зум
-  final double _minZoom = 0.1; // ограничения зума
+  final double _minZoom = 0.01; // ограничения зума
   final double _maxZoom = 1;
   final double _zoomResponse = 10.0; // больше = резче
   final double _fitPadding = 200.0; // поля вокруг кораблей при автоподгонке
@@ -76,6 +77,17 @@ class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDet
       ),
     );
     camera.viewport.add(_zoomHud);
+    _battleHud = TextComponent(
+      text: 'targets: none',
+      anchor: Anchor.topRight,
+      textRenderer: TextPaint(
+        style: const TextStyle(
+          color: Color(0xFFFFFFFF),
+          fontSize: 14,
+        ),
+      ),
+    );
+    camera.viewport.add(_battleHud);
 
     _infoPanel = RectangleComponent(
       paint: Paint()..color = const Color(0xFF20232A),
@@ -178,6 +190,7 @@ class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDet
     if (viewportSize.x == 0 || viewportSize.y == 0) {
       return;
     }
+    _battleHud.position = Vector2(viewportSize.x - 8, 8);
     final panelHeight = viewportSize.y * 0.2;
     _infoPanel
       ..size = Vector2(viewportSize.x, panelHeight)
@@ -316,6 +329,20 @@ class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDet
       'point world: ${qWorld.x.toStringAsFixed(1)}, ${qWorld.y.toStringAsFixed(1)}',
       'point screen: ${qScreen.x.toStringAsFixed(1)}, ${qScreen.y.toStringAsFixed(1)}',
     ].join('\n');
+    final enemies = _shipsInBattle();
+    if (enemies.isEmpty) {
+      _battleHud.text = 'targets: none';
+    } else {
+      final lines = <String>['targets (${enemies.length}):'];
+      for (final ship in enemies) {
+        final distance = (ship.position - player.position).length;
+        final omega = _relativeAngularSpeed(player, ship);
+        lines.add(
+          '#${ship.index} d=${distance.toStringAsFixed(1)}m  w=${omega.toStringAsFixed(4)}rad/s',
+        );
+      }
+      _battleHud.text = lines.join('\n');
+    }
     _infoText.text = lastTappedShip == null
         ? 'selected ship: none'
         : 'selected ship index: ${lastTappedShip!.index}';
@@ -328,6 +355,22 @@ class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDet
     if (radius <= 0) return;
     _orbitRadius = radius;
     _actionNote = 'orbit radius: ${_orbitRadius.toStringAsFixed(0)}';
+  }
+
+  List<ShipComponent> _shipsInBattle() {
+    return world.children
+        .whereType<ShipComponent>()
+        .where((ship) => !identical(ship, player))
+        .toList(growable: false);
+  }
+
+  double _relativeAngularSpeed(ShipComponent source, ShipComponent target) {
+    final r = target.position - source.position;
+    final v = target.velocity - source.velocity;
+    final r2 = (r.x * r.x) + (r.y * r.y);
+    if (r2 < 1e-9) return 0.0;
+    final cross = (r.x * v.y) - (r.y * v.x);
+    return cross / r2;
   }
 
   void _addRadiusButton(String label, double radius) {
