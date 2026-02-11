@@ -1,5 +1,5 @@
-name: etourn
-description: "PVP arena game"
+name: etourn_server
+description: "PVP arena game server"
 publish_to: 'none'
 version: 0.1.0
 

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:ship_move/mainscreen.dart';
+import 'mainscreen.dart';
 
 void main() {
   // Точка входа приложения.

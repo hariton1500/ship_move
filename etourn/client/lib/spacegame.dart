@@ -5,7 +5,7 @@ import 'package:flame/game.dart';
 import 'package:flame/experimental.dart';
 import 'package:flame/input.dart';
 import 'package:flutter/material.dart';
-import 'package:ship_move/shipcomponent.dart';
+import 'presentation/shipcomponent.dart';
 
 // Основной игровой класс: камера, ввод и логика сцены.
 class SpaceGame extends FlameGame with DoubleTapDetector, ScrollDetector, PanDetector {
