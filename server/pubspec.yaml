@@ -1,0 +1,16 @@
+name: etourn_server
+description: "PVP arena game server"
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  space_core:
+    path: ../core
+  shelf: ^1.4.0
+  shelf_web_socket: ^1.0.4
+  web_socket_channel: ^2.3.0
+  vector_math: ^2.2.0
+  

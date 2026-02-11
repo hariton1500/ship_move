@@ -1,7 +1,0 @@
-name: etourn_server
-description: "PVP arena game server"
-publish_to: 'none'
-version: 0.1.0
-
-environment:
-  sdk: ^3.11.0

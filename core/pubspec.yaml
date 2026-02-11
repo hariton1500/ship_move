@@ -1,0 +1,6 @@
+name: space_core
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  vector_math: ^2.1.4
