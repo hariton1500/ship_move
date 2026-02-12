@@ -1,6 +1,6 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
-import 'spacegame.dart';
+import 'space_game.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
