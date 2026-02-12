@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'auth/auth_screen.dart';
+import 'networkclient.dart';
 import 'space_game.dart';
 
 class MainScreen extends StatefulWidget {
@@ -14,11 +16,77 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   late SpaceGame game;
+  final NetworkClient _network = NetworkClient.instance;
+  StreamSubscription<Map<String, dynamic>>? _eventSub;
+  String _serverStatus = 'Lobby';
 
   @override
   void initState() {
     super.initState();
     game = SpaceGame();
+    _eventSub = _network.events.listen(_onServerEvent);
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    super.dispose();
+  }
+
+  void _onServerEvent(Map<String, dynamic> event) {
+    final type = event['type'] as String?;
+    if (!mounted || type == null) return;
+    switch (type) {
+      case 'queue_status':
+        final randomWaiting = event['randomWaiting'];
+        final tournamentWaiting = event['tournamentWaiting'];
+        setState(() {
+          _serverStatus =
+              'Queue: random=$randomWaiting tournament=$tournamentWaiting';
+        });
+        break;
+      case 'match_started':
+        final team = event['team'];
+        final durationSec = event['durationSec'];
+        final mode = event['mode'];
+        setState(() {
+          _serverStatus =
+              'Match started: mode=$mode team=$team duration=${durationSec}s';
+        });
+        break;
+      case 'match_ended':
+        final winner = event['winner'];
+        final reason = event['reason'];
+        final scoreA = event['scoreA'];
+        final scoreB = event['scoreB'];
+        setState(() {
+          _serverStatus =
+              'Match ended: winner=$winner reason=$reason score A:$scoreA B:$scoreB';
+        });
+        break;
+      default:
+        break;
+    }
+  }
+
+  Future<void> _joinQueue(String mode) async {
+    final result = await _network.joinQueue(mode: mode, shipPoints: 10);
+    if (!mounted) return;
+    setState(() {
+      _serverStatus = result.ok
+          ? 'Joined $mode queue'
+          : 'Queue join failed: ${result.reason ?? "unknown"}';
+    });
+  }
+
+  Future<void> _leaveQueue() async {
+    final result = await _network.leaveQueue();
+    if (!mounted) return;
+    setState(() {
+      _serverStatus = result.ok
+          ? 'Left queue'
+          : 'Queue leave failed: ${result.reason ?? "unknown"}';
+    });
   }
 
   @override
@@ -41,17 +109,44 @@ class _MainScreenState extends State<MainScreen> {
             },
             icon: const Icon(Icons.move_to_inbox),
           ),
+          IconButton(
+            onPressed: () => _joinQueue('random'),
+            icon: const Icon(Icons.shuffle),
+            tooltip: 'Join Random Queue',
+          ),
+          IconButton(
+            onPressed: () => _joinQueue('tournament'),
+            icon: const Icon(Icons.emoji_events),
+            tooltip: 'Join Tournament Queue',
+          ),
+          IconButton(
+            onPressed: _leaveQueue,
+            icon: const Icon(Icons.clear),
+            tooltip: 'Leave Queue',
+          ),
         ],
       ),
-      body: Center(
-        child: GameWidget(
-          game: game,
-          overlayBuilderMap: {
-            'radiusInput': (context, game) {
-              return RadiusInputOverlay(game: game as SpaceGame);
-            },
-          },
-        ),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            color: const Color(0x11000000),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Text(_serverStatus),
+          ),
+          Expanded(
+            child: Center(
+              child: GameWidget(
+                game: game,
+                overlayBuilderMap: {
+                  'radiusInput': (context, game) {
+                    return RadiusInputOverlay(game: game as SpaceGame);
+                  },
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

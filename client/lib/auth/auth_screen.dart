@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../mainscreen.dart';
+import '../networkclient.dart';
 import 'account_store.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -11,6 +12,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final AccountStore _store = AccountStore();
+  final NetworkClient _network = NetworkClient.instance;
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   List<LocalAccount> _savedAccounts = const [];
@@ -50,12 +52,16 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() => _status = 'Введите email и пароль.');
       return;
     }
-    final ok = await _store.register(email: email, password: password);
+    final result = await _network.register(email: email, password: password);
     if (!mounted) return;
-    if (!ok) {
-      setState(() => _status = 'Аккаунт уже существует.');
+    if (!result.ok) {
+      setState(
+        () =>
+            _status = 'Регистрация не выполнена: ${result.reason ?? "unknown"}',
+      );
       return;
     }
+    await _store.register(email: email, password: password);
     await _load();
     if (!mounted) return;
     setState(() => _status = 'Регистрация успешна.');
@@ -69,12 +75,16 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() => _status = 'Введите email и пароль.');
       return;
     }
-    final ok = await _store.login(email: email, password: password);
+    final result = await _network.login(email: email, password: password);
     if (!mounted) return;
-    if (!ok) {
-      setState(() => _status = 'Неверный email или пароль.');
+    if (!result.ok) {
+      setState(
+        () => _status = 'Вход не выполнен: ${result.reason ?? "unknown"}',
+      );
       return;
     }
+    await _store.register(email: email, password: password);
+    await _load();
     setState(() => _status = 'Вход выполнен.');
     _openGame(email.toLowerCase());
   }
@@ -82,8 +92,18 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _loginSaved(LocalAccount account) async {
     _emailController.text = account.email;
     _passwordController.text = account.password;
-    await _store.saveLastEmail(account.email);
+    final result = await _network.login(
+      email: account.email,
+      password: account.password,
+    );
     if (!mounted) return;
+    if (!result.ok) {
+      setState(
+        () => _status = 'Вход не выполнен: ${result.reason ?? "unknown"}',
+      );
+      return;
+    }
+    await _store.saveLastEmail(account.email);
     _openGame(account.email);
   }
 
