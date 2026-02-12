@@ -1,20 +1,15 @@
 import 'package:flutter/material.dart';
-import 'mainscreen.dart';
+import 'auth/auth_screen.dart';
 
 void main() {
-  // Точка входа приложения.
   runApp(const MainApp());
 }
 
-// Корневой виджет приложения.
 class MainApp extends StatelessWidget {
   const MainApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Базовое приложение с главным экраном.
-    return const MaterialApp(
-      home: MainScreen(),
-    );
+    return const MaterialApp(home: AuthScreen());
   }
 }

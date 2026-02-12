@@ -5,6 +5,7 @@ import 'package:flame/experimental.dart';
 import 'package:flame/game.dart';
 import 'package:flame/input.dart';
 import 'package:flutter/material.dart';
+import 'package:space_core/battle_rules.dart';
 import 'presentation/shipcomponent.dart';
 
 class SpaceGame extends FlameGame
@@ -31,7 +32,7 @@ class SpaceGame extends FlameGame
   double _orbitRadius = 20000;
   double _orbitAngle = 0.0;
   final double _orbitAngularSpeed = 0.2;
-  static const double worldSizeMeters = 100000;
+  final math.Random _rng = math.Random();
   double _targetZoom = 1.0;
   final double _minZoom = 0.01;
   final double _maxZoom = 1;
@@ -40,20 +41,26 @@ class SpaceGame extends FlameGame
 
   @override
   Future<void> onLoad() async {
+    final arenaRadius = BattleRules.arenaRadiusMeters;
     camera.setBounds(
-      Rectangle.fromLTWH(0, 0, worldSizeMeters, worldSizeMeters),
+      Rectangle.fromLTWH(
+        -arenaRadius,
+        -arenaRadius,
+        BattleRules.arenaDiameterMeters,
+        BattleRules.arenaDiameterMeters,
+      ),
       considerViewport: true,
     );
 
     player = ShipComponent(index: 0, isPlayer: true)
-      ..position = Vector2(50000, 50000);
+      ..position = _randomSpawnPosition();
     world.add(player);
 
     camera.viewfinder.anchor = Anchor.center;
     camera.viewfinder.zoom = _targetZoom;
 
     point = ShipComponent(index: 1, onTap: _onShipTapped)
-      ..position = Vector2(60000, 60000);
+      ..position = _randomSpawnPosition();
     world.add(point);
 
     _shipsReady = true;
@@ -64,10 +71,7 @@ class SpaceGame extends FlameGame
       position: Vector2(8, 8),
       anchor: Anchor.topLeft,
       textRenderer: TextPaint(
-        style: const TextStyle(
-          color: Color(0xFFFFFFFF),
-          fontSize: 14,
-        ),
+        style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
       ),
     );
     camera.viewport.add(_zoomHud);
@@ -76,10 +80,7 @@ class SpaceGame extends FlameGame
       text: 'targets: none',
       anchor: Anchor.topRight,
       textRenderer: TextPaint(
-        style: const TextStyle(
-          color: Color(0xFFFFFFFF),
-          fontSize: 14,
-        ),
+        style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
       ),
     );
     camera.viewport.add(_battleHud);
@@ -92,10 +93,7 @@ class SpaceGame extends FlameGame
       position: Vector2(12, 8),
       anchor: Anchor.topLeft,
       textRenderer: TextPaint(
-        style: const TextStyle(
-          color: Color(0xFFFFFFFF),
-          fontSize: 14,
-        ),
+        style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14),
       ),
     );
     _infoPanel.add(_infoText);
@@ -160,8 +158,9 @@ class SpaceGame extends FlameGame
       onPressed: _openRadiusInput,
       width: 70,
     );
-    _customRadiusLabel =
-        _customRadiusButton.button!.children.whereType<TextComponent>().first;
+    _customRadiusLabel = _customRadiusButton.button!.children
+        .whereType<TextComponent>()
+        .first;
     _infoPanel.add(_customRadiusButton);
 
     camera.viewport.add(_infoPanel);
@@ -194,10 +193,7 @@ class SpaceGame extends FlameGame
 
     _infoText.position = Vector2(12, 8);
     final buttonSize = _moveToButton.size;
-    _moveToButton.position = Vector2(
-      _infoPanel.size.x - buttonSize.x - 12,
-      8,
-    );
+    _moveToButton.position = Vector2(_infoPanel.size.x - buttonSize.x - 12, 8);
     _moveToLabel.position = buttonSize / 2;
 
     final orbitSize = _orbitButton.size;
@@ -305,12 +301,13 @@ class SpaceGame extends FlameGame
 
     if (_orbitActive && _orbitTarget != null) {
       _orbitAngle += _orbitAngularSpeed * dt;
-      final offset = Vector2(
-        math.cos(_orbitAngle),
-        math.sin(_orbitAngle),
-      ) * _orbitRadius;
+      final offset =
+          Vector2(math.cos(_orbitAngle), math.sin(_orbitAngle)) * _orbitRadius;
       player.moveTo(_orbitTarget!.position + offset);
     }
+
+    _clampToArena(player);
+    _clampToArena(point);
 
     final pWorld = player.position;
     final qWorld = point.position;
@@ -376,9 +373,7 @@ class SpaceGame extends FlameGame
       width: 52,
     );
     _radiusButtons.add(button);
-    _radiusLabels.add(
-      button.button!.children.whereType<TextComponent>().first,
-    );
+    _radiusLabels.add(button.button!.children.whereType<TextComponent>().first);
     _infoPanel.add(button);
   }
 
@@ -427,5 +422,21 @@ class SpaceGame extends FlameGame
   void onDoubleTapDown(TapDownInfo info) {
     final worldPos = camera.globalToLocal(info.eventPosition.widget);
     player.moveTo(worldPos);
+  }
+
+  Vector2 _randomSpawnPosition() {
+    final angle = _rng.nextDouble() * math.pi * 2;
+    final radius = BattleRules.arenaRadiusMeters * math.sqrt(_rng.nextDouble());
+    return Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
+  }
+
+  void _clampToArena(ShipComponent ship) {
+    final distance = ship.position.length;
+    if (distance > BattleRules.arenaRadiusMeters && distance > 0) {
+      ship.position =
+          ship.position.normalized() * BattleRules.arenaRadiusMeters;
+      ship.velocity.setZero();
+      ship.target = null;
+    }
   }
 }

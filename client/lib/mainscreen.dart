@@ -1,22 +1,23 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'auth/auth_screen.dart';
 import 'space_game.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  const MainScreen({super.key, required this.accountEmail});
+
+  final String accountEmail;
 
   @override
   State<MainScreen> createState() => _MainScreenState();
 }
 
 class _MainScreenState extends State<MainScreen> {
-
-  late SpaceGame game; // экземпляр игры
+  late SpaceGame game;
 
   @override
   void initState() {
     super.initState();
-    // Инициализация игры один раз.
     game = SpaceGame();
   }
 
@@ -24,15 +25,25 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        title: Text('Pilot: ${widget.accountEmail}'),
         actions: [
-          // Тестовая кнопка: поставить цель игроку.
-          IconButton(onPressed: () {
-            game.player.target = Vector2(500, 500);
-          }, icon: Icon(Icons.move_to_inbox))
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const AuthScreen()),
+              );
+            },
+            icon: const Icon(Icons.logout),
+          ),
+          IconButton(
+            onPressed: () {
+              game.player.target = Vector2(500, 500);
+            },
+            icon: const Icon(Icons.move_to_inbox),
+          ),
         ],
       ),
       body: Center(
-        // Встраиваем игровое поле.
         child: GameWidget(
           game: game,
           overlayBuilderMap: {
@@ -46,7 +57,6 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// Оверлей для ввода произвольного радиуса орбиты.
 class RadiusInputOverlay extends StatefulWidget {
   const RadiusInputOverlay({super.key, required this.game});
 
