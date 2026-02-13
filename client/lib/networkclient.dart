@@ -107,6 +107,97 @@ class NetworkClient {
     );
   }
 
+  Future<Map<String, dynamic>> fetchHangarRoom() async {
+    final response = await _request(
+      key: 'hangar:get',
+      payload: {'type': 'hangar_get'},
+    );
+    return response;
+  }
+
+  Future<Map<String, dynamic>> unlockShipMastery(String hull) async {
+    final response = await _request(
+      key: 'mastery:unlock',
+      payload: {'type': 'mastery_unlock', 'hull': hull},
+    );
+    return response;
+  }
+
+  Future<Map<String, dynamic>> buyShip(String hull) async {
+    final response = await _request(
+      key: 'shop:buy',
+      payload: {'type': 'ship_buy', 'hull': hull},
+    );
+    return response;
+  }
+
+  Future<Map<String, dynamic>> fetchShipFitting(String shipId) async {
+    final response = await _request(
+      key: 'fitting:get',
+      payload: {'type': 'fitting_get', 'shipId': shipId},
+    );
+    return response;
+  }
+
+  Future<Map<String, dynamic>> installModule({
+    required String shipId,
+    required String moduleId,
+  }) async {
+    final response = await _request(
+      key: 'fitting:install',
+      payload: {
+        'type': 'fitting_install',
+        'shipId': shipId,
+        'moduleId': moduleId,
+      },
+    );
+    return response;
+  }
+
+  Future<Map<String, dynamic>> removeModule({
+    required String shipId,
+    required String slot,
+    required int index,
+  }) async {
+    final response = await _request(
+      key: 'fitting:remove',
+      payload: {
+        'type': 'fitting_remove',
+        'shipId': shipId,
+        'slot': slot,
+        'index': index,
+      },
+    );
+    return response;
+  }
+
+  Future<void> sendMoveCommand({
+    required int shipId,
+    required double x,
+    required double y,
+  }) async {
+    await connect();
+    _channel?.sink.add(
+      jsonEncode({'type': 'move', 'shipId': shipId, 'x': x, 'y': y}),
+    );
+  }
+
+  Future<void> sendOrbitCommand({
+    required int shipId,
+    required int targetId,
+    required double radius,
+  }) async {
+    await connect();
+    _channel?.sink.add(
+      jsonEncode({
+        'type': 'orbit',
+        'shipId': shipId,
+        'targetId': targetId,
+        'radius': radius,
+      }),
+    );
+  }
+
   void _onMessage(dynamic raw) {
     final decoded = jsonDecode(raw as String);
     if (decoded is! Map) return;
@@ -120,6 +211,22 @@ class NetworkClient {
     }
     if (type == 'queue' && action != null) {
       _completePending('queue:$action', message);
+      return;
+    }
+    if (type == 'hangar' && action != null) {
+      _completePending('hangar:$action', message);
+      return;
+    }
+    if (type == 'mastery' && action != null) {
+      _completePending('mastery:$action', message);
+      return;
+    }
+    if (type == 'shop' && action != null) {
+      _completePending('shop:$action', message);
+      return;
+    }
+    if (type == 'fitting' && action != null) {
+      _completePending('fitting:$action', message);
       return;
     }
 

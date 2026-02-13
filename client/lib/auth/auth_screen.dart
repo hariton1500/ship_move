@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../mainscreen.dart';
+import '../hangar_room_screen.dart';
 import '../networkclient.dart';
 import 'account_store.dart';
 
@@ -109,7 +109,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   void _openGame(String email) {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => MainScreen(accountEmail: email)),
+      MaterialPageRoute(builder: (_) => HangarRoomScreen(accountEmail: email)),
     );
   }
 

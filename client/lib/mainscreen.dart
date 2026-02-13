@@ -6,9 +6,18 @@ import 'networkclient.dart';
 import 'space_game.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key, required this.accountEmail});
+  const MainScreen({
+    super.key,
+    required this.accountEmail,
+    this.matchId,
+    this.shipId,
+    this.mode,
+  });
 
   final String accountEmail;
+  final int? matchId;
+  final int? shipId;
+  final String? mode;
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -23,8 +32,16 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    game = SpaceGame();
+    game = SpaceGame(network: _network, playerShipId: widget.shipId);
     _eventSub = _network.events.listen(_onServerEvent);
+    if (widget.matchId != null) {
+      _serverStatus =
+          'In match #${widget.matchId} mode=${widget.mode ?? "unknown"} ship=${widget.shipId ?? "n/a"}';
+      game.setBattleContext(
+        playerShipId: widget.shipId,
+        matchId: widget.matchId,
+      );
+    }
   }
 
   @override
@@ -46,12 +63,24 @@ class _MainScreenState extends State<MainScreen> {
         });
         break;
       case 'match_started':
+        final matchId = (event['matchId'] as num?)?.toInt();
+        final shipId = (event['shipId'] as num?)?.toInt();
         final team = event['team'];
         final durationSec = event['durationSec'];
         final mode = event['mode'];
+        game.setBattleContext(playerShipId: shipId, matchId: matchId);
         setState(() {
           _serverStatus =
               'Match started: mode=$mode team=$team duration=${durationSec}s';
+        });
+        break;
+      case 'state':
+        game.applyServerState(event);
+        final remainingSec = event['remainingSec'];
+        final shipCount = (event['ships'] as List?)?.length ?? 0;
+        setState(() {
+          _serverStatus =
+              'Battle state: ships=$shipCount remaining=${remainingSec ?? "-"}s';
         });
         break;
       case 'match_ended':
@@ -105,7 +134,7 @@ class _MainScreenState extends State<MainScreen> {
           ),
           IconButton(
             onPressed: () {
-              game.player.target = Vector2(500, 500);
+              game.movePlayerTo(Vector2(500, 500));
             },
             icon: const Icon(Icons.move_to_inbox),
           ),

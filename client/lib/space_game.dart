@@ -6,15 +6,23 @@ import 'package:flame/game.dart';
 import 'package:flame/input.dart';
 import 'package:flutter/material.dart';
 import 'package:space_core/battle_rules.dart';
+import 'networkclient.dart';
 import 'presentation/shipcomponent.dart';
 
 class SpaceGame extends FlameGame
     with DoubleTapDetector, ScrollDetector, PanDetector {
-  late ShipComponent player, point;
+  SpaceGame({required this.network, int? playerShipId})
+    : _playerShipId = playerShipId;
+
+  final NetworkClient network;
+  int? _playerShipId;
+
+  final Map<int, ShipComponent> _shipsById = {};
+  bool _didInitialFit = false;
+  ShipComponent? lastTappedShip;
+
   late TextComponent _zoomHud;
   late TextComponent _battleHud;
-  bool _shipsReady = false;
-  ShipComponent? lastTappedShip;
   late RectangleComponent _infoPanel;
   late TextComponent _infoText;
   late ButtonComponent _moveToButton;
@@ -25,19 +33,99 @@ class SpaceGame extends FlameGame
   final List<TextComponent> _radiusLabels = [];
   late ButtonComponent _customRadiusButton;
   late TextComponent _customRadiusLabel;
+
   bool _uiReady = false;
   String _actionNote = '';
-  bool _orbitActive = false;
-  ShipComponent? _orbitTarget;
   double _orbitRadius = 20000;
-  double _orbitAngle = 0.0;
-  final double _orbitAngularSpeed = 0.2;
-  final math.Random _rng = math.Random();
+  int? _lastServerMatchId;
+  int _lastServerRemainingSec = 0;
+
   double _targetZoom = 1.0;
   final double _minZoom = 0.01;
   final double _maxZoom = 1;
   final double _zoomResponse = 10.0;
   final double _fitPadding = 200.0;
+
+  ShipComponent? get player =>
+      _playerShipId == null ? null : _shipsById[_playerShipId!];
+
+  void setBattleContext({int? playerShipId, int? matchId}) {
+    if (playerShipId != null) {
+      _playerShipId = playerShipId;
+    }
+    if (matchId != null) {
+      _lastServerMatchId = matchId;
+    }
+  }
+
+  Future<void> applyServerState(Map<String, dynamic> event) async {
+    final shipsRaw = event['ships'];
+    if (shipsRaw is! List) return;
+
+    _lastServerMatchId =
+        (event['matchId'] as num?)?.toInt() ?? _lastServerMatchId;
+    _lastServerRemainingSec =
+        (event['remainingSec'] as num?)?.toInt() ?? _lastServerRemainingSec;
+    final seen = <int>{};
+    for (final raw in shipsRaw) {
+      if (raw is! Map) continue;
+      final s = Map<String, dynamic>.from(raw);
+      final id = (s['id'] as num?)?.toInt();
+      final x = (s['x'] as num?)?.toDouble();
+      final y = (s['y'] as num?)?.toDouble();
+      final vx = (s['vx'] as num?)?.toDouble() ?? 0;
+      final vy = (s['vy'] as num?)?.toDouble() ?? 0;
+      if (id == null || x == null || y == null) continue;
+
+      seen.add(id);
+      var ship = _shipsById[id];
+      if (ship == null) {
+        ship = ShipComponent(
+          index: id,
+          isPlayer: _playerShipId == id,
+          onTap: _onShipTapped,
+        );
+        _shipsById[id] = ship;
+        world.add(ship);
+      }
+
+      ship
+        ..position = Vector2(x, y)
+        ..velocity = Vector2(vx, vy)
+        ..target = null;
+      if (ship.velocity.length2 > 1e-6) {
+        ship.angleRad = math.atan2(ship.velocity.y, ship.velocity.x);
+        ship.angle = ship.angleRad;
+      }
+    }
+
+    final removeIds = _shipsById.keys
+        .where((id) => !seen.contains(id))
+        .toList();
+    for (final id in removeIds) {
+      final ship = _shipsById.remove(id);
+      ship?.removeFromParent();
+      if (lastTappedShip != null && lastTappedShip!.index == id) {
+        lastTappedShip = null;
+      }
+    }
+
+    if (!_didInitialFit && _shipsById.isNotEmpty) {
+      _fitToShips();
+      _didInitialFit = true;
+    }
+  }
+
+  Future<void> movePlayerTo(Vector2 worldPos) async {
+    if (_playerShipId == null) return;
+    await network.sendMoveCommand(
+      shipId: _playerShipId!,
+      x: worldPos.x,
+      y: worldPos.y,
+    );
+    _actionNote =
+        'action: move to ${worldPos.x.toStringAsFixed(0)},${worldPos.y.toStringAsFixed(0)}';
+  }
 
   @override
   Future<void> onLoad() async {
@@ -51,20 +139,8 @@ class SpaceGame extends FlameGame
       ),
       considerViewport: true,
     );
-
-    player = ShipComponent(index: 0, isPlayer: true)
-      ..position = _randomSpawnPosition();
-    world.add(player);
-
     camera.viewfinder.anchor = Anchor.center;
     camera.viewfinder.zoom = _targetZoom;
-
-    point = ShipComponent(index: 1, onTap: _onShipTapped)
-      ..position = _randomSpawnPosition();
-    world.add(point);
-
-    _shipsReady = true;
-    _fitToShips();
 
     _zoomHud = TextComponent(
       text: 'zoom: ${camera.viewfinder.zoom.toStringAsFixed(2)}',
@@ -174,16 +250,15 @@ class SpaceGame extends FlameGame
     if (_uiReady) {
       _layoutInfoPanel();
     }
-    if (!_shipsReady) return;
-    _fitToShips();
+    if (_shipsById.isNotEmpty) {
+      _fitToShips();
+    }
   }
 
   void _layoutInfoPanel() {
     if (!_uiReady) return;
     final viewportSize = camera.viewport.virtualSize;
-    if (viewportSize.x == 0 || viewportSize.y == 0) {
-      return;
-    }
+    if (viewportSize.x == 0 || viewportSize.y == 0) return;
     _battleHud.position = Vector2(viewportSize.x - 8, 8);
     final panelHeight = viewportSize.y * 0.2;
     _infoPanel
@@ -202,7 +277,6 @@ class SpaceGame extends FlameGame
       8,
     );
     _orbitLabel.position = orbitSize / 2;
-
     _layoutRadiusButtons(panelHeight);
   }
 
@@ -223,21 +297,15 @@ class SpaceGame extends FlameGame
   }
 
   void _fitToShips() {
-    if (!_shipsReady) {
-      return;
-    }
+    final ships = _shipsById.values.toList(growable: false);
+    if (ships.isEmpty) return;
     final viewportSize = camera.viewport.virtualSize;
-    if (viewportSize.x == 0 || viewportSize.y == 0) {
-      return;
-    }
-    camera.stop();
+    if (viewportSize.x == 0 || viewportSize.y == 0) return;
 
-    final ships = [player, point];
     double minX = ships.first.position.x;
     double maxX = ships.first.position.x;
     double minY = ships.first.position.y;
     double maxY = ships.first.position.y;
-
     for (final s in ships) {
       minX = math.min(minX, s.position.x);
       maxX = math.max(maxX, s.position.x);
@@ -267,68 +335,68 @@ class SpaceGame extends FlameGame
     lastTappedShip = ship;
   }
 
-  void _onMoveToPressed() {
-    if (lastTappedShip == null) {
+  Future<void> _onMoveToPressed() async {
+    final myShip = player;
+    if (myShip == null || lastTappedShip == null) {
       _actionNote = 'action: move to (no target)';
       return;
     }
-    final target = lastTappedShip!.position.clone();
-    player.moveTo(target);
+    await network.sendMoveCommand(
+      shipId: _playerShipId!,
+      x: lastTappedShip!.position.x,
+      y: lastTappedShip!.position.y,
+    );
     _actionNote = 'action: move to ship ${lastTappedShip!.index}';
   }
 
-  void _onOrbitPressed() {
-    if (lastTappedShip == null) {
+  Future<void> _onOrbitPressed() async {
+    if (_playerShipId == null || lastTappedShip == null) {
       _actionNote = 'action: orbit (no target)';
       return;
     }
-    _orbitTarget = lastTappedShip;
-    _orbitActive = true;
-    final toPlayer = player.position - _orbitTarget!.position;
-    _orbitAngle = math.atan2(toPlayer.y, toPlayer.x);
+    await network.sendOrbitCommand(
+      shipId: _playerShipId!,
+      targetId: lastTappedShip!.index,
+      radius: _orbitRadius,
+    );
     _actionNote =
-        'action: orbit ship ${_orbitTarget!.index} r=${_orbitRadius.toStringAsFixed(0)}';
+        'action: orbit ship ${lastTappedShip!.index} r=${_orbitRadius.toStringAsFixed(0)}';
   }
 
   @override
   void update(double dt) {
     super.update(dt);
-    if (!_shipsReady) return;
 
     final current = camera.viewfinder.zoom;
     final t = 1 - math.exp(-_zoomResponse * dt);
     camera.viewfinder.zoom = current + (_targetZoom - current) * t;
 
-    if (_orbitActive && _orbitTarget != null) {
-      _orbitAngle += _orbitAngularSpeed * dt;
-      final offset =
-          Vector2(math.cos(_orbitAngle), math.sin(_orbitAngle)) * _orbitRadius;
-      player.moveTo(_orbitTarget!.position + offset);
+    final myShip = player;
+    if (myShip != null) {
+      final pScreen = camera.localToGlobal(myShip.position);
+      _zoomHud.text = [
+        'match: ${_lastServerMatchId ?? "-"}  t=${_lastServerRemainingSec}s',
+        'zoom: ${camera.viewfinder.zoom.toStringAsFixed(2)}',
+        'player id: ${myShip.index}',
+        'player world: ${myShip.position.x.toStringAsFixed(1)}, ${myShip.position.y.toStringAsFixed(1)}',
+        'player screen: ${pScreen.x.toStringAsFixed(1)}, ${pScreen.y.toStringAsFixed(1)}',
+      ].join('\n');
+    } else {
+      _zoomHud.text = [
+        'match: ${_lastServerMatchId ?? "-"}  t=${_lastServerRemainingSec}s',
+        'zoom: ${camera.viewfinder.zoom.toStringAsFixed(2)}',
+        'waiting server state...',
+      ].join('\n');
     }
 
-    _clampToArena(player);
-    _clampToArena(point);
-
-    final pWorld = player.position;
-    final qWorld = point.position;
-    final pScreen = camera.localToGlobal(pWorld);
-    final qScreen = camera.localToGlobal(qWorld);
-    _zoomHud.text = [
-      'zoom: ${camera.viewfinder.zoom.toStringAsFixed(2)}',
-      'player world: ${pWorld.x.toStringAsFixed(1)}, ${pWorld.y.toStringAsFixed(1)}',
-      'player screen: ${pScreen.x.toStringAsFixed(1)}, ${pScreen.y.toStringAsFixed(1)}',
-      'point world: ${qWorld.x.toStringAsFixed(1)}, ${qWorld.y.toStringAsFixed(1)}',
-      'point screen: ${qScreen.x.toStringAsFixed(1)}, ${qScreen.y.toStringAsFixed(1)}',
-    ].join('\n');
-
     final enemies = _shipsInBattle();
-    if (enemies.isEmpty) {
+    if (enemies.isEmpty || myShip == null) {
       _battleHud.text = 'targets: none';
     } else {
       final lines = <String>['targets (${enemies.length}):'];
       for (final ship in enemies) {
-        final distance = (ship.position - player.position).length;
-        final omega = _relativeAngularSpeed(player, ship);
+        final distance = (ship.position - myShip.position).length;
+        final omega = _relativeAngularSpeed(myShip, ship);
         lines.add(
           '#${ship.index} d=${distance.toStringAsFixed(1)}m  w=${omega.toStringAsFixed(4)}rad/s',
         );
@@ -351,9 +419,10 @@ class SpaceGame extends FlameGame
   }
 
   List<ShipComponent> _shipsInBattle() {
-    return world.children
-        .whereType<ShipComponent>()
-        .where((ship) => !identical(ship, player))
+    final myShip = player;
+    if (myShip == null) return const [];
+    return _shipsById.values
+        .where((ship) => !identical(ship, myShip))
         .toList(growable: false);
   }
 
@@ -393,7 +462,7 @@ class SpaceGame extends FlameGame
         ),
       ),
     );
-    final button = ButtonComponent(
+    return ButtonComponent(
       button: RectangleComponent(
         size: Vector2(width, 28),
         paint: Paint()..color = const Color(0xFF3A3F4B),
@@ -404,7 +473,6 @@ class SpaceGame extends FlameGame
       ),
       onPressed: onPressed,
     );
-    return button;
   }
 
   void _openRadiusInput() {
@@ -421,22 +489,6 @@ class SpaceGame extends FlameGame
   @override
   void onDoubleTapDown(TapDownInfo info) {
     final worldPos = camera.globalToLocal(info.eventPosition.widget);
-    player.moveTo(worldPos);
-  }
-
-  Vector2 _randomSpawnPosition() {
-    final angle = _rng.nextDouble() * math.pi * 2;
-    final radius = BattleRules.arenaRadiusMeters * math.sqrt(_rng.nextDouble());
-    return Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
-  }
-
-  void _clampToArena(ShipComponent ship) {
-    final distance = ship.position.length;
-    if (distance > BattleRules.arenaRadiusMeters && distance > 0) {
-      ship.position =
-          ship.position.normalized() * BattleRules.arenaRadiusMeters;
-      ship.velocity.setZero();
-      ship.target = null;
-    }
+    movePlayerTo(worldPos);
   }
 }
