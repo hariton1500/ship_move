@@ -84,11 +84,17 @@ class NetworkClient {
 
   Future<NetworkResult> joinQueue({
     required String mode,
+    required String shipId,
     int shipPoints = 10,
   }) async {
     final response = await _request(
       key: 'queue:join',
-      payload: {'type': 'queue_join', 'mode': mode, 'shipPoints': shipPoints},
+      payload: {
+        'type': 'queue_join',
+        'mode': mode,
+        'shipId': shipId,
+        'shipPoints': shipPoints,
+      },
     );
     return NetworkResult(
       ok: response['ok'] == true,

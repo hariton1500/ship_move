@@ -98,16 +98,6 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Future<void> _joinQueue(String mode) async {
-    final result = await _network.joinQueue(mode: mode, shipPoints: 10);
-    if (!mounted) return;
-    setState(() {
-      _serverStatus = result.ok
-          ? 'Joined $mode queue'
-          : 'Queue join failed: ${result.reason ?? "unknown"}';
-    });
-  }
-
   Future<void> _leaveQueue() async {
     final result = await _network.leaveQueue();
     if (!mounted) return;
@@ -137,16 +127,6 @@ class _MainScreenState extends State<MainScreen> {
               game.movePlayerTo(Vector2(500, 500));
             },
             icon: const Icon(Icons.move_to_inbox),
-          ),
-          IconButton(
-            onPressed: () => _joinQueue('random'),
-            icon: const Icon(Icons.shuffle),
-            tooltip: 'Join Random Queue',
-          ),
-          IconButton(
-            onPressed: () => _joinQueue('tournament'),
-            icon: const Icon(Icons.emoji_events),
-            tooltip: 'Join Tournament Queue',
           ),
           IconButton(
             onPressed: _leaveQueue,

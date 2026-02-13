@@ -812,6 +812,25 @@ void _handleQueueJoin(PlayerSession session, Map<String, dynamic> data) {
     });
     return;
   }
+  if (session.email == null) {
+    _send(session.channel, {
+      'type': 'queue',
+      'action': 'join',
+      'ok': false,
+      'reason': 'not_authenticated',
+    });
+    return;
+  }
+  final profile = players[session.email!];
+  if (profile == null) {
+    _send(session.channel, {
+      'type': 'queue',
+      'action': 'join',
+      'ok': false,
+      'reason': 'player_not_found',
+    });
+    return;
+  }
   if (session.matchId != null) {
     _logWarn('queue_join_denied_in_match', {
       'sid': _sid(session),
@@ -841,13 +860,34 @@ void _handleQueueJoin(PlayerSession session, Map<String, dynamic> data) {
     return;
   }
 
-  final pointsRaw = data['shipPoints'];
+  final shipId = (data['shipId'] as String? ?? '').trim();
+  if (shipId.isEmpty) {
+    _send(session.channel, {
+      'type': 'queue',
+      'action': 'join',
+      'ok': false,
+      'reason': 'ship_not_selected',
+    });
+    return;
+  }
+  final selectedShip = _findOwnedShip(profile, shipId);
+  if (selectedShip == null) {
+    _send(session.channel, {
+      'type': 'queue',
+      'action': 'join',
+      'ok': false,
+      'reason': 'ship_not_found',
+    });
+    return;
+  }
+  final pointsRaw = selectedShip['points'];
   final points = _parsePoints(pointsRaw);
 
   _removeFromQueues(session);
   session
     ..queueMode = mode
-    ..shipPoints = points;
+    ..shipPoints = points
+    ..selectedShipId = shipId;
   _queueForMode(mode).add(session);
 
   _send(session.channel, {
@@ -855,12 +895,14 @@ void _handleQueueJoin(PlayerSession session, Map<String, dynamic> data) {
     'action': 'join',
     'ok': true,
     'mode': mode,
+    'shipId': shipId,
     'shipPoints': points,
   });
   _logInfo('queue_join', {
     'sid': _sid(session),
     'email': session.email,
     'mode': mode,
+    'shipId': shipId,
     'shipPoints': points,
   });
   _broadcastQueueStatus();
@@ -1284,6 +1326,7 @@ class PlayerSession {
   bool authenticated = false;
   String? email;
   String? queueMode;
+  String? selectedShipId;
   int shipPoints = defaultShipPoints;
   int? matchId;
   int? shipId;

@@ -18,7 +18,7 @@ class SpaceGame extends FlameGame
   int? _playerShipId;
 
   final Map<int, ShipComponent> _shipsById = {};
-  bool _didInitialFit = false;
+  bool _didInitialWorldFit = false;
   ShipComponent? lastTappedShip;
 
   late TextComponent _zoomHud;
@@ -44,7 +44,7 @@ class SpaceGame extends FlameGame
   final double _minZoom = 0.01;
   final double _maxZoom = 1;
   final double _zoomResponse = 10.0;
-  final double _fitPadding = 200.0;
+  final double _worldFitPadding = 1000.0;
 
   ShipComponent? get player =>
       _playerShipId == null ? null : _shipsById[_playerShipId!];
@@ -108,11 +108,6 @@ class SpaceGame extends FlameGame
       if (lastTappedShip != null && lastTappedShip!.index == id) {
         lastTappedShip = null;
       }
-    }
-
-    if (!_didInitialFit && _shipsById.isNotEmpty) {
-      _fitToShips();
-      _didInitialFit = true;
     }
   }
 
@@ -250,8 +245,9 @@ class SpaceGame extends FlameGame
     if (_uiReady) {
       _layoutInfoPanel();
     }
-    if (_shipsById.isNotEmpty) {
-      _fitToShips();
+    if (!_didInitialWorldFit) {
+      _fitToBattlefield();
+      _didInitialWorldFit = true;
     }
   }
 
@@ -296,26 +292,12 @@ class SpaceGame extends FlameGame
     _customRadiusLabel.position = _customRadiusButton.size / 2;
   }
 
-  void _fitToShips() {
-    final ships = _shipsById.values.toList(growable: false);
-    if (ships.isEmpty) return;
+  void _fitToBattlefield() {
     final viewportSize = camera.viewport.virtualSize;
     if (viewportSize.x == 0 || viewportSize.y == 0) return;
-
-    double minX = ships.first.position.x;
-    double maxX = ships.first.position.x;
-    double minY = ships.first.position.y;
-    double maxY = ships.first.position.y;
-    for (final s in ships) {
-      minX = math.min(minX, s.position.x);
-      maxX = math.max(maxX, s.position.x);
-      minY = math.min(minY, s.position.y);
-      maxY = math.max(maxY, s.position.y);
-    }
-
-    final width = (maxX - minX) + _fitPadding * 2;
-    final height = (maxY - minY) + _fitPadding * 2;
-    final center = Vector2((minX + maxX) * 0.5, (minY + maxY) * 0.5);
+    final width = BattleRules.arenaDiameterMeters + _worldFitPadding * 2;
+    final height = BattleRules.arenaDiameterMeters + _worldFitPadding * 2;
+    final center = Vector2.zero();
 
     final zoomX = viewportSize.x / width;
     final zoomY = viewportSize.y / height;

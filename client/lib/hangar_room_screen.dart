@@ -26,6 +26,7 @@ class _HangarRoomScreenState extends State<HangarRoomScreen> {
   int _freeXp = 0;
   int _atronMasteryXpCost = 5;
   List<Map<String, dynamic>> _ships = const [];
+  String? _selectedShipId;
   bool _openingMatch = false;
 
   @override
@@ -67,6 +68,12 @@ class _HangarRoomScreenState extends State<HangarRoomScreen> {
             (mastery['atron'] as num?)?.toInt() ?? _atronMasteryXpCost;
       }
       _ships = ships;
+      if (_ships.isEmpty) {
+        _selectedShipId = null;
+      } else if (_selectedShipId == null ||
+          !_ships.any((s) => s['id'] == _selectedShipId)) {
+        _selectedShipId = _ships.first['id'] as String?;
+      }
       _status = 'Hangar ready';
     });
   }
@@ -90,11 +97,30 @@ class _HangarRoomScreenState extends State<HangarRoomScreen> {
   }
 
   Future<void> _joinQueue(String mode) async {
-    final result = await _network.joinQueue(mode: mode, shipPoints: 10);
+    Map<String, dynamic>? selected;
+    for (final ship in _ships) {
+      if (ship['id'] == _selectedShipId) {
+        selected = ship;
+        break;
+      }
+    }
+    if (selected == null) {
+      setState(() {
+        _status = 'Select ship in hangar before joining queue';
+      });
+      return;
+    }
+    final shipId = (selected['id'] as String?) ?? '';
+    final shipPoints = (selected['points'] as num?)?.toInt() ?? 10;
+    final result = await _network.joinQueue(
+      mode: mode,
+      shipId: shipId,
+      shipPoints: shipPoints,
+    );
     if (!mounted) return;
     setState(() {
       _status = result.ok
-          ? 'Joined $mode queue'
+          ? 'Joined $mode queue with $shipId'
           : 'Queue join failed: ${result.reason ?? "unknown"}';
     });
   }
@@ -215,6 +241,13 @@ class _HangarRoomScreenState extends State<HangarRoomScreen> {
                               final ship = _ships[index];
                               return Card(
                                 child: ListTile(
+                                  selected: ship['id'] == _selectedShipId,
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedShipId = ship['id'] as String?;
+                                      _status = 'Selected ship: ${ship['id']}';
+                                    });
+                                  },
                                   title: Text('${ship['name']}'),
                                   subtitle: Text(
                                     'class=${ship['class']} hull=${ship['hull']} points=${ship['points']}',
@@ -236,14 +269,18 @@ class _HangarRoomScreenState extends State<HangarRoomScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: FilledButton(
-                          onPressed: () => _joinQueue('random'),
+                          onPressed: _selectedShipId == null
+                              ? null
+                              : () => _joinQueue('random'),
                           child: const Text('Join Random'),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: () => _joinQueue('tournament'),
+                          onPressed: _selectedShipId == null
+                              ? null
+                              : () => _joinQueue('tournament'),
                           child: const Text('Join Tournament'),
                         ),
                       ),
