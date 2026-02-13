@@ -204,6 +204,26 @@ class NetworkClient {
     );
   }
 
+  Future<void> sendModuleSetCommand({
+    required int shipId,
+    required String moduleId,
+    required bool active,
+    String? moduleRef,
+    int? targetId,
+  }) async {
+    await connect();
+    _channel?.sink.add(
+      jsonEncode({
+        'type': 'module_set',
+        'shipId': shipId,
+        'moduleId': moduleId,
+        if (moduleRef != null && moduleRef.isNotEmpty) 'moduleRef': moduleRef,
+        'active': active,
+        if (targetId != null) 'targetId': targetId,
+      }),
+    );
+  }
+
   void _onMessage(dynamic raw) {
     final decoded = jsonDecode(raw as String);
     if (decoded is! Map) return;

@@ -20,6 +20,19 @@ const int newPlayerStartingFreeXp = 20;
 const int atronMasteryXpCost = 5;
 const int atronShipPrice = 30000;
 const String playersStoragePath = 'data/players.json';
+const double baseMoveSpeed = 100.0;
+const double minDistanceEpsilon = 1e-6;
+const double atronShieldHp = 120.0;
+const double atronArmorHp = 90.0;
+const double atronCapacitor = 100.0;
+const double blasterRange = 9000.0;
+const double blasterDps = 28.0;
+const double railgunRange = 18000.0;
+const double railgunDps = 20.0;
+const double webRange = 10000.0;
+const double webSpeedFactor = 0.5;
+const double afterburnerSpeedFactor = 1.6;
+const double afterburnerCapUsePerSecond = 8.0;
 const Map<String, int> masteryXpCosts = {'atron': atronMasteryXpCost};
 const Map<String, int> shipBuyPrices = {'atron': atronShipPrice};
 const Map<String, Map<String, int>> hullFittingStats = {
@@ -90,6 +103,7 @@ final waitingTournament = <PlayerSession>[];
 final shipOwnerById = <int, PlayerSession>{};
 final shipTeamById = <int, String>{};
 final shipPointsById = <int, int>{};
+final shipRuntimeById = <int, ShipRuntimeState>{};
 final _rng = math.Random();
 
 ActiveMatch? activeMatch;
@@ -135,6 +149,7 @@ void main() async {
       _processCommands();
       movementSystem.update(world, dt);
       _clampShipsToArena();
+      _updateCombat(dt);
       _updateMatchLifecycle();
       _broadcastState();
     });
@@ -181,6 +196,9 @@ void _handleIncomingMessage(PlayerSession session, Map<String, dynamic> data) {
     case 'move':
     case 'orbit':
       _handlePilotCommand(session, type, data);
+      break;
+    case 'module_set':
+      _handleModuleSetCommand(session, data);
       break;
     default:
       _logWarn('unknown_message_type', {'sid': _sid(session), 'type': type});
@@ -953,6 +971,97 @@ void _handlePilotCommand(
   commandQueue.add(OrbitCommand(shipId, targetId, radius));
 }
 
+void _handleModuleSetCommand(PlayerSession session, Map<String, dynamic> data) {
+  if (session.matchId == null ||
+      activeMatch == null ||
+      activeMatch!.id != session.matchId ||
+      session.shipId == null) {
+    _send(session.channel, {
+      'type': 'module',
+      'action': 'set',
+      'ok': false,
+      'reason': 'outside_match',
+    });
+    return;
+  }
+
+  final requestedShipId = (data['shipId'] as num?)?.toInt();
+  final shipId = session.shipId!;
+  if (requestedShipId == null || requestedShipId != shipId) {
+    _send(session.channel, {
+      'type': 'module',
+      'action': 'set',
+      'ok': false,
+      'reason': 'ship_mismatch',
+    });
+    return;
+  }
+
+  final moduleId = (data['moduleId'] as String? ?? '').trim().toLowerCase();
+  final moduleRef = (data['moduleRef'] as String? ?? '').trim().toLowerCase();
+  final active = data['active'] == true;
+  final targetId = (data['targetId'] as num?)?.toInt();
+  final runtime = shipRuntimeById[shipId];
+  final moduleState = runtime?.findModule(
+    moduleRef: moduleRef.isEmpty ? null : moduleRef,
+    moduleId: moduleId.isEmpty ? null : moduleId,
+  );
+  if (runtime == null || moduleState == null) {
+    _send(session.channel, {
+      'type': 'module',
+      'action': 'set',
+      'ok': false,
+      'reason': 'module_not_fitted',
+      'moduleId': moduleId,
+      if (moduleRef.isNotEmpty) 'moduleRef': moduleRef,
+    });
+    return;
+  }
+
+  final effectiveModuleId = moduleState.moduleId;
+  if (active) {
+    if (_isTargetedModule(effectiveModuleId)) {
+      if (targetId == null || world.ships[targetId] == null) {
+        _send(session.channel, {
+          'type': 'module',
+          'action': 'set',
+          'ok': false,
+          'reason': 'target_not_found',
+          'moduleId': effectiveModuleId,
+        });
+        return;
+      }
+      if (shipTeamById[targetId] == shipTeamById[shipId]) {
+        _send(session.channel, {
+          'type': 'module',
+          'action': 'set',
+          'ok': false,
+          'reason': 'target_is_ally',
+          'moduleId': effectiveModuleId,
+          'targetId': targetId,
+        });
+        return;
+      }
+      moduleState.targetId = targetId;
+    } else {
+      moduleState.targetId = null;
+    }
+  } else {
+    moduleState.targetId = null;
+  }
+  moduleState.active = active;
+  _send(session.channel, {
+    'type': 'module',
+    'action': 'set',
+    'ok': true,
+    'shipId': shipId,
+    'moduleId': effectiveModuleId,
+    'moduleRef': moduleState.moduleRef,
+    'active': active,
+    if (moduleState.targetId != null) 'targetId': moduleState.targetId,
+  });
+}
+
 void _processCommands() {
   for (final cmd in commandQueue) {
     final ship = world.ships[cmd.shipId];
@@ -960,7 +1069,13 @@ void _processCommands() {
 
     if (cmd is MoveCommand) {
       final target = Vector2(cmd.x, cmd.y);
-      ship.velocity = (target - ship.position).normalized() * 100.0;
+      final delta = target - ship.position;
+      if (delta.length2 <= minDistanceEpsilon) {
+        ship.velocity.setZero();
+        continue;
+      }
+      final speedMultiplier = shipRuntimeById[cmd.shipId]?.speedMultiplier ?? 1.0;
+      ship.velocity = delta.normalized() * (baseMoveSpeed * speedMultiplier);
     } else if (cmd is OrbitCommand) {
       ship.orbitTarget = cmd.targetId;
       ship.orbitRadius = cmd.radius;
@@ -1061,6 +1176,7 @@ void _startMatch({
   shipOwnerById.clear();
   shipTeamById.clear();
   shipPointsById.clear();
+  shipRuntimeById.clear();
 
   final id = _nextMatchId++;
   final now = DateTime.now();
@@ -1118,6 +1234,7 @@ void _assignShipToPlayer(PlayerSession session, String team) {
   shipOwnerById[shipId] = session;
   shipTeamById[shipId] = team;
   shipPointsById[shipId] = session.shipPoints;
+  shipRuntimeById[shipId] = _buildShipRuntime(session);
 }
 
 void _updateMatchLifecycle() {
@@ -1136,6 +1253,164 @@ void _updateMatchLifecycle() {
   if (!now.isBefore(match.endsAt)) {
     final winner = aliveA > aliveB ? 'A' : (aliveB > aliveA ? 'B' : 'draw');
     _finishMatch(winner: winner, reason: 'timer');
+  }
+}
+
+ShipRuntimeState _buildShipRuntime(PlayerSession session) {
+  final email = session.email;
+  final selectedShipId = session.selectedShipId;
+  if (email == null || selectedShipId == null) {
+    return ShipRuntimeState.withFitting(const <String, dynamic>{});
+  }
+  final profile = players[email];
+  if (profile == null) {
+    return ShipRuntimeState.withFitting(const <String, dynamic>{});
+  }
+  final ship = _findOwnedShip(profile, selectedShipId);
+  if (ship == null) {
+    return ShipRuntimeState.withFitting(const <String, dynamic>{});
+  }
+
+  final hull = (ship['hull'] as String? ?? '').toLowerCase();
+  final fitting = _normalizeFitting(
+    Map<String, dynamic>.from(ship['fitting'] as Map? ?? const {}),
+    hull,
+  );
+  return ShipRuntimeState.withFitting(fitting);
+}
+
+bool _isTargetedModule(String moduleId) {
+  return moduleId == 'light_blaster_i' ||
+      moduleId == 'small_railgun_i' ||
+      moduleId == 'stasis_web_i';
+}
+
+void _updateCombat(double dt) {
+  if (shipRuntimeById.isEmpty) return;
+
+  for (final runtime in shipRuntimeById.values) {
+    runtime.speedMultiplier = 1.0;
+  }
+
+  for (final entry in shipRuntimeById.entries) {
+    final runtime = entry.value;
+    final afterburners = runtime.modules.where(
+      (m) => m.moduleId == 'afterburner_i' && m.active,
+    );
+    for (final ab in afterburners) {
+      final needCap = afterburnerCapUsePerSecond * dt;
+      if (runtime.capacitor < needCap) {
+        ab
+          ..active = false
+          ..targetId = null;
+        continue;
+      }
+      runtime.capacitor -= needCap;
+      runtime.speedMultiplier = math.max(
+        runtime.speedMultiplier,
+        afterburnerSpeedFactor,
+      );
+    }
+  }
+
+  for (final entry in shipRuntimeById.entries) {
+    final sourceShipId = entry.key;
+    final sourcePos = world.ships[sourceShipId]?.position;
+    if (sourcePos == null) continue;
+    final webs = entry.value.modules.where(
+      (m) => m.moduleId == 'stasis_web_i' && m.active && m.targetId != null,
+    );
+    for (final web in webs) {
+      final targetId = web.targetId!;
+      final targetShip = world.ships[targetId];
+      final targetRuntime = shipRuntimeById[targetId];
+      if (targetShip == null || targetRuntime == null) {
+        web
+          ..active = false
+          ..targetId = null;
+        continue;
+      }
+      final distance = (targetShip.position - sourcePos).length;
+      if (distance > webRange) continue;
+      targetRuntime.speedMultiplier *= webSpeedFactor;
+    }
+  }
+
+  final damageByTarget = <int, double>{};
+  for (final entry in shipRuntimeById.entries) {
+    final sourceShipId = entry.key;
+    final sourcePos = world.ships[sourceShipId]?.position;
+    if (sourcePos == null) continue;
+
+    void addWeaponDamage(String moduleId, double range, double dps) {
+      final weapons = entry.value.modules.where(
+        (m) => m.moduleId == moduleId && m.active && m.targetId != null,
+      );
+      for (final module in weapons) {
+        final targetId = module.targetId!;
+        final targetShip = world.ships[targetId];
+        if (targetShip == null || shipRuntimeById[targetId] == null) {
+          module
+            ..active = false
+            ..targetId = null;
+          continue;
+        }
+        if (shipTeamById[targetId] == shipTeamById[sourceShipId]) {
+          module
+            ..active = false
+            ..targetId = null;
+          continue;
+        }
+        final distance = (targetShip.position - sourcePos).length;
+        if (distance > range) continue;
+        damageByTarget[targetId] = (damageByTarget[targetId] ?? 0) + dps * dt;
+      }
+    }
+
+    addWeaponDamage('light_blaster_i', blasterRange, blasterDps);
+    addWeaponDamage('small_railgun_i', railgunRange, railgunDps);
+  }
+
+  final destroyed = <int>[];
+  for (final entry in damageByTarget.entries) {
+    final targetRuntime = shipRuntimeById[entry.key];
+    if (targetRuntime == null) continue;
+    var damage = entry.value;
+    if (damage <= 0) continue;
+    if (targetRuntime.shield > 0) {
+      final applied = math.min(targetRuntime.shield, damage);
+      targetRuntime.shield -= applied;
+      damage -= applied;
+    }
+    if (damage > 0 && targetRuntime.armor > 0) {
+      final applied = math.min(targetRuntime.armor, damage);
+      targetRuntime.armor -= applied;
+      damage -= applied;
+    }
+    if (targetRuntime.armor <= 0) {
+      destroyed.add(entry.key);
+    }
+  }
+
+  for (final shipId in destroyed) {
+    _destroyShip(shipId);
+  }
+}
+
+void _destroyShip(int shipId) {
+  world.ships.remove(shipId);
+  shipOwnerById.remove(shipId);
+  shipTeamById.remove(shipId);
+  shipPointsById.remove(shipId);
+  shipRuntimeById.remove(shipId);
+  for (final runtime in shipRuntimeById.values) {
+    for (final module in runtime.modules) {
+      if (module.targetId == shipId) {
+        module
+          ..active = false
+          ..targetId = null;
+      }
+    }
   }
 }
 
@@ -1167,6 +1442,7 @@ void _finishMatch({required String winner, required String reason}) {
   shipOwnerById.clear();
   shipTeamById.clear();
   shipPointsById.clear();
+  shipRuntimeById.clear();
   activeMatch = null;
   _logInfo('match_ended', {
     'matchId': match.id,
@@ -1202,6 +1478,7 @@ void _broadcastState() {
           'id': s.id,
           'team': shipTeamById[s.id],
           'points': shipPointsById[s.id],
+          'runtime': shipRuntimeById[s.id]?.toJson(),
           'faction': s.faction.name,
           'class': s.shipClass.name,
           'hull': s.hullName.name,
@@ -1246,10 +1523,7 @@ void _handleDisconnect(PlayerSession session) {
   _removeFromQueues(session);
 
   if (session.shipId != null) {
-    world.ships.remove(session.shipId!);
-    shipOwnerById.remove(session.shipId!);
-    shipTeamById.remove(session.shipId!);
-    shipPointsById.remove(session.shipId!);
+    _destroyShip(session.shipId!);
   }
 
   if (activeMatch != null && session.matchId == activeMatch!.id) {
@@ -1364,6 +1638,98 @@ class TeamsBuildResult {
   final int pointsB;
 
   TeamsBuildResult(this.teamA, this.teamB, this.pointsA, this.pointsB);
+}
+
+class ShipRuntimeState {
+  double shield;
+  double armor;
+  double capacitor;
+  double speedMultiplier;
+  final List<ModuleRuntimeState> modules;
+
+  ShipRuntimeState({
+    required this.shield,
+    required this.armor,
+    required this.capacitor,
+    required this.modules,
+    this.speedMultiplier = 1.0,
+  });
+
+  factory ShipRuntimeState.withFitting(Map<String, dynamic> fitting) {
+    final modules = <ModuleRuntimeState>[];
+    void addSlot(String slotName) {
+      final list = (fitting[slotName] as List? ?? const []).whereType<String>();
+      var index = 0;
+      for (final rawModuleId in list) {
+        final moduleId = rawModuleId.toLowerCase();
+        if (_moduleById(moduleId) == null) continue;
+        modules.add(
+          ModuleRuntimeState(
+            moduleId: moduleId,
+            moduleRef: '$slotName:$index',
+            slot: slotName,
+          ),
+        );
+        index++;
+      }
+    }
+
+    addSlot('high');
+    addSlot('mid');
+    addSlot('low');
+    return ShipRuntimeState(
+      shield: atronShieldHp,
+      armor: atronArmorHp,
+      capacitor: atronCapacitor,
+      modules: modules,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'shield': shield,
+    'armor': armor,
+    'capacitor': capacitor,
+    'speedMultiplier': speedMultiplier,
+    'modules': modules.map((m) => m.toJson()).toList(growable: false),
+  };
+
+  ModuleRuntimeState? findModule({String? moduleRef, String? moduleId}) {
+    if (moduleRef != null && moduleRef.isNotEmpty) {
+      for (final module in modules) {
+        if (module.moduleRef == moduleRef) return module;
+      }
+    }
+    if (moduleId != null && moduleId.isNotEmpty) {
+      for (final module in modules) {
+        if (module.moduleId == moduleId) return module;
+      }
+    }
+    return null;
+  }
+}
+
+class ModuleRuntimeState {
+  final String moduleId;
+  final String moduleRef;
+  final String slot;
+  bool active;
+  int? targetId;
+
+  ModuleRuntimeState({
+    required this.moduleId,
+    required this.moduleRef,
+    required this.slot,
+    this.active = false,
+    this.targetId,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'moduleId': moduleId,
+    'moduleRef': moduleRef,
+    'slot': slot,
+    'active': active,
+    if (targetId != null) 'targetId': targetId,
+  };
 }
 
 class PlayerProfile {

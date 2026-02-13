@@ -29,6 +29,8 @@ class SpaceGame extends FlameGame
   late TextComponent _moveToLabel;
   late ButtonComponent _orbitButton;
   late TextComponent _orbitLabel;
+  final List<ButtonComponent> _moduleButtons = [];
+  final List<TextComponent> _moduleButtonLabels = [];
   final List<ButtonComponent> _radiusButtons = [];
   final List<TextComponent> _radiusLabels = [];
   late ButtonComponent _customRadiusButton;
@@ -39,6 +41,11 @@ class SpaceGame extends FlameGame
   double _orbitRadius = 20000;
   int? _lastServerMatchId;
   int _lastServerRemainingSec = 0;
+  double _playerShield = 0;
+  double _playerArmor = 0;
+  double _playerCapacitor = 0;
+  List<_HudModuleSlot> _moduleSlots = const [];
+  String _moduleLayoutFingerprint = '';
 
   double _targetZoom = 1.0;
   final double _minZoom = 0.01;
@@ -96,6 +103,9 @@ class SpaceGame extends FlameGame
       if (ship.velocity.length2 > 1e-6) {
         ship.angleRad = math.atan2(ship.velocity.y, ship.velocity.x);
         ship.angle = ship.angleRad;
+      }
+      if (_playerShipId == id) {
+        _consumeRuntimeState(s['runtime']);
       }
     }
 
@@ -273,6 +283,16 @@ class SpaceGame extends FlameGame
       8,
     );
     _orbitLabel.position = orbitSize / 2;
+
+    var moduleX = _orbitButton.position.x - 8;
+    for (var i = _moduleButtons.length - 1; i >= 0; i--) {
+      final button = _moduleButtons[i];
+      final label = _moduleButtonLabels[i];
+      moduleX -= button.size.x;
+      button.position = Vector2(moduleX, 8);
+      label.position = button.size / 2;
+      moduleX -= 8;
+    }
     _layoutRadiusButtons(panelHeight);
   }
 
@@ -389,6 +409,9 @@ class SpaceGame extends FlameGame
     _infoText.text = lastTappedShip == null
         ? 'selected ship: none'
         : 'selected ship index: ${lastTappedShip!.index}';
+    _infoText.text +=
+        '\nshield ${_playerShield.toStringAsFixed(1)} armor ${_playerArmor.toStringAsFixed(1)} cap ${_playerCapacitor.toStringAsFixed(1)}';
+    _refreshModuleButtonLabels();
     if (_actionNote.isNotEmpty) {
       _infoText.text += '\n$_actionNote';
     }
@@ -415,6 +438,158 @@ class SpaceGame extends FlameGame
     if (r2 < 1e-9) return 0.0;
     final cross = (r.x * v.y) - (r.y * v.x);
     return cross / r2;
+  }
+
+  void _consumeRuntimeState(dynamic runtimeRaw) {
+    if (runtimeRaw is! Map) return;
+    final runtime = Map<String, dynamic>.from(runtimeRaw);
+    _playerShield = (runtime['shield'] as num?)?.toDouble() ?? _playerShield;
+    _playerArmor = (runtime['armor'] as num?)?.toDouble() ?? _playerArmor;
+    _playerCapacitor =
+        (runtime['capacitor'] as num?)?.toDouble() ?? _playerCapacitor;
+    final modulesRaw = runtime['modules'];
+    if (modulesRaw is! List) {
+      _moduleSlots = const [];
+      _rebuildModuleHudIfNeeded('');
+      return;
+    }
+    final next = <_HudModuleSlot>[];
+    for (final m in modulesRaw) {
+      if (m is! Map) continue;
+      final module = Map<String, dynamic>.from(m);
+      final moduleId = (module['moduleId'] as String? ?? '').toLowerCase();
+      final moduleRef = (module['moduleRef'] as String? ?? '').toLowerCase();
+      final slot = (module['slot'] as String? ?? '').toLowerCase();
+      if (moduleId.isEmpty || moduleRef.isEmpty || slot.isEmpty) continue;
+      final index = _slotIndexFromRef(moduleRef);
+      next.add(
+        _HudModuleSlot(
+          moduleId: moduleId,
+          moduleRef: moduleRef,
+          slot: slot,
+          index: index,
+          active: module['active'] == true,
+        ),
+      );
+    }
+    next.sort((a, b) {
+      final slotCmp = _slotWeight(a.slot).compareTo(_slotWeight(b.slot));
+      if (slotCmp != 0) return slotCmp;
+      return a.index.compareTo(b.index);
+    });
+    final fingerprint = next.map((m) => '${m.slot}:${m.index}:${m.moduleId}').join('|');
+    _moduleSlots = next;
+    _rebuildModuleHudIfNeeded(fingerprint);
+  }
+
+  int _slotIndexFromRef(String moduleRef) {
+    final parts = moduleRef.split(':');
+    if (parts.length != 2) return 0;
+    return int.tryParse(parts[1]) ?? 0;
+  }
+
+  int _slotWeight(String slot) {
+    if (slot == 'high') return 0;
+    if (slot == 'mid') return 1;
+    if (slot == 'low') return 2;
+    return 3;
+  }
+
+  void _rebuildModuleHudIfNeeded(String newFingerprint) {
+    if (newFingerprint == _moduleLayoutFingerprint && _moduleButtons.isNotEmpty) {
+      return;
+    }
+    _moduleLayoutFingerprint = newFingerprint;
+    _rebuildModuleHud();
+  }
+
+  void _rebuildModuleHud() {
+    for (final button in _moduleButtons) {
+      button.removeFromParent();
+    }
+    _moduleButtons.clear();
+    _moduleButtonLabels.clear();
+
+    for (final module in _moduleSlots) {
+      final button = _makePanelButton(
+        label: _moduleHudLabel(module),
+        onPressed: () => _onModulePressed(module.moduleRef),
+        width: 96,
+      );
+      final label = button.button!.children.whereType<TextComponent>().first;
+      _moduleButtons.add(button);
+      _moduleButtonLabels.add(label);
+      _infoPanel.add(button);
+    }
+    if (_uiReady) {
+      _layoutInfoPanel();
+    }
+  }
+
+  Future<void> _onModulePressed(String moduleRef) async {
+    if (_playerShipId == null) return;
+    _HudModuleSlot? module;
+    for (final m in _moduleSlots) {
+      if (m.moduleRef == moduleRef) {
+        module = m;
+        break;
+      }
+    }
+    if (module == null) return;
+
+    final nextActive = !module.active;
+    int? targetId;
+    if (nextActive && _isTargetedModuleId(module.moduleId)) {
+      if (lastTappedShip == null) {
+        _actionNote = 'target is not selected for ${_moduleShortName(module.moduleId)}';
+        return;
+      }
+      targetId = lastTappedShip!.index;
+    }
+
+    await network.sendModuleSetCommand(
+      shipId: _playerShipId!,
+      moduleId: module.moduleId,
+      moduleRef: module.moduleRef,
+      active: nextActive,
+      targetId: targetId,
+    );
+    _actionNote = nextActive
+        ? '${_moduleShortName(module.moduleId)} on${targetId != null ? " -> $targetId" : ""}'
+        : '${_moduleShortName(module.moduleId)} off';
+  }
+
+  bool _isTargetedModuleId(String moduleId) {
+    return moduleId == 'light_blaster_i' ||
+        moduleId == 'small_railgun_i' ||
+        moduleId == 'stasis_web_i';
+  }
+
+  String _moduleShortName(String moduleId) {
+    if (moduleId == 'light_blaster_i') return 'blaster';
+    if (moduleId == 'small_railgun_i') return 'railgun';
+    if (moduleId == 'stasis_web_i') return 'web';
+    if (moduleId == 'afterburner_i') return 'ab';
+    if (moduleId == 'damage_control_i') return 'dc';
+    if (moduleId == 'magnetic_field_stabilizer_i') return 'mfs';
+    return moduleId;
+  }
+
+  String _slotLabel(String slot, int index) {
+    final prefix = slot.isEmpty ? '?' : slot[0].toUpperCase();
+    return '$prefix${index + 1}';
+  }
+
+  String _moduleHudLabel(_HudModuleSlot module) {
+    final activeSuffix = module.active ? '*' : '';
+    return '${_slotLabel(module.slot, module.index)} ${_moduleShortName(module.moduleId)}$activeSuffix';
+  }
+
+  void _refreshModuleButtonLabels() {
+    final count = math.min(_moduleSlots.length, _moduleButtonLabels.length);
+    for (var i = 0; i < count; i++) {
+      _moduleButtonLabels[i].text = _moduleHudLabel(_moduleSlots[i]);
+    }
   }
 
   void _addRadiusButton(String label, double radius) {
@@ -473,4 +648,20 @@ class SpaceGame extends FlameGame
     final worldPos = camera.globalToLocal(info.eventPosition.widget);
     movePlayerTo(worldPos);
   }
+}
+
+class _HudModuleSlot {
+  final String moduleId;
+  final String moduleRef;
+  final String slot;
+  final int index;
+  final bool active;
+
+  const _HudModuleSlot({
+    required this.moduleId,
+    required this.moduleRef,
+    required this.slot,
+    required this.index,
+    required this.active,
+  });
 }
